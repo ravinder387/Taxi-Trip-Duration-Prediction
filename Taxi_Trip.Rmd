@@ -1,0 +1,289 @@
+---
+title: "Taxi Trip Duration Prediction"
+author: "Ravinder Ram"
+date: "25/12/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Files
+```{r}
+getwd()
+list.files()
+setwd()
+```
+
+### Import dataset
+```{r}
+library(tidyverse)
+train <- read_csv("train.csv")
+test <- read_csv("test.csv")
+str(train)
+str(test)
+```
+### Solution -1 
+make a ml model that predict datetime but there is no ml algo do this type of task so i escape it
+
+### Solution -2
+calculate distance between two location then divide avg speed to get trip duration
+
+function which measure distance between two location
+```{r}
+# make a function
+earth.dist <- function (pickup_long, pickup_lat, dropoff_long, dropoff_lat) {
+rad <- pi/180
+a1 <- pickup_lat * rad
+a2 <- pickup_long * rad
+b1 <- dropoff_lat * rad
+b2 <- dropoff_long * rad
+dlon <- b2 - a2
+dlat <- b1 - a1
+a <- (sin(dlat/2))^2 + cos(a1) * cos(b1) * (sin(dlon/2))^2
+c <- 2 * atan2(sqrt(a), sqrt(1 - a))
+R <- 6378.145
+d <- R * c
+return(d)
+}
+```
+
+
+test the function
+```{r}
+earth.dist(-73.98813, 40.73203, -73.99017, 40.75668)
+```
+
+apply this function to test dataset
+add new col loc_dist on test dataset
+```{r}
+test <- test %>% mutate(loc_dist = earth.dist(test$pickup_longitude,                                             test$pickup_latitude,
+                            test$dropoff_longitude, test$dropoff_latitude))
+```
+
+add new col trip_duration on test dataset 
+```{r}
+test <- test %>% mutate(trip_duration = (loc_dist * 3600)/12.5)
+```
+
+now check your position in kaggle leaderboard
+### submit in kaggle
+```{r}
+submission <- data.frame(id = test$id, trip_duration = test$trip_duration )
+
+#write csv
+write.csv(submission, "kaggle.csv", row.names = F)
+```
+
+### Solution-3
+
+rerun all codes of solution-1 and solution-2
+
+add new col by calculate earth distance for train data
+```{r}
+train <- train %>% mutate(loc_dist = earth.dist(train$pickup_longitude,                                             train$pickup_latitude,
+                            train$dropoff_longitude, train$dropoff_latitude))
+```
+
+check structure and new col which you created recently
+```{r}
+glimpse(train)
+```
+
+extract some information from datetime column
+```{r}
+library(lubridate)
+# pickup_datetime
+# extracts week
+train$p_week <- train$pickup_datetime %>% wday()
+test$p_week <- test$pickup_datetime %>% wday()
+# weekend - saturday, sunday office holiday
+# new col weekend(5) & no_weekend(0)
+train$weekend <- if_else(train$p_week > 1 &
+                           train$p_week < 7, 0, 5)
+test$weekend <- if_else(test$p_week > 1 &
+                           test$p_week < 7, 0, 5)
+
+# extract months
+train$p_month <- train$pickup_datetime %>% month()
+test$p_month <- test$pickup_datetime %>% month()
+
+# extract hours
+train$greeting <- train$pickup_datetime %>% hour()
+test$greeting <- test$pickup_datetime %>% hour()
+# rush hour - 7 to 9a.m  and 6 to 8p.m
+# rush - 65  no_rush - 45
+train$rush <- if_else(train$greeting >= 7 &
+                        train$greeting <= 9, 65, 45)
+test$rush <- if_else(test$greeting >= 7 &
+                        test$greeting <= 9, 65, 45)
+
+train$rush <- if_else(train$greeting >= 18 &
+                        train$greeting <= 20, 65, 45)
+test$rush <- if_else(test$greeting >= 18 &
+                        test$greeting <= 20, 65, 45)
+# extract minute
+train$minute <- train$pickup_datetime %>% minute()
+test$minute <- test$pickup_datetime %>% minute()
+
+## early morning(4 to 8a.m) - 25
+train$greeting <- if_else(train$greeting >= 4 & train$greeting <= 8, 25L, train$greeting)
+test$greeting <- if_else(test$greeting >= 4 & test$greeting <= 8, 25L, test$greeting)
+## morning(8a.m to 12) - 26
+train$greeting <- if_else(train$greeting >= 9 & train$greeting <= 12, 26L, train$greeting)
+test$greeting <- if_else(test$greeting >= 9 & test$greeting <= 12, 26L, test$greeting)
+## afternoon(12 to 17) - 27
+train$greeting <- if_else(train$greeting >= 13 & train$greeting <= 17, 27L, train$greeting)
+test$greeting <- if_else(test$greeting >= 13 & test$greeting <= 17, 27L, test$greeting)
+## evening(17 to 20) - 28
+train$greeting <- if_else(train$greeting >= 18 & train$greeting <= 20, 28L, train$greeting)
+test$greeting <- if_else(test$greeting >= 18 & test$greeting <= 20, 28L, test$greeting)
+## night(20 to 23) - 29
+train$greeting <- if_else(train$greeting >= 21 & train$greeting <= 23, 29L, train$greeting)
+test$greeting <- if_else(test$greeting >= 21 & test$greeting <= 23, 29L, test$greeting)
+
+## late night
+train$greeting <- if_else(train$greeting >= 0 & train$greeting <= 3, 30L, train$greeting)
+test$greeting <- if_else(test$greeting >= 0 & test$greeting <= 3, 30L, test$greeting)
+
+as.factor(train$greeting)
+as.factor(test$greeting)
+
+## you can also try for dropoff time in train data but dropoff time column 
+## not availbale in test data so i escape it
+```
+### data explore and wrangle
+
+see relation between passenger_count and trip_duration
+```{r}
+train %>% ggplot(aes(x = as.factor(passenger_count), y = trip_duration)) + 
+  geom_boxplot()
+```
+
+make new col van(90) and taxi(9)
+```{r}
+train <- train %>% mutate(car = if_else(passenger_count > 4, 90, 9 ))
+test <- test %>% mutate(car = if_else(passenger_count > 4, 90, 9 ))
+```
+
+
+calculate manhattan distance
+```{r}
+# make a function
+earth.dist <- function (pickup_long, pickup_lat, dropoff_long, dropoff_lat) {
+rad <- pi/180
+a1 <- pickup_lat * rad
+a2 <- pickup_long * rad
+b1 <- dropoff_lat * rad
+b2 <- dropoff_long * rad
+dlon <- b2 - a2
+dlat <- b1 - a1
+a <- (sin(dlat/2))^2 + cos(a1) * cos(b1) * (sin(dlon/2))^2
+c <- 2 * atan2(sqrt(a), sqrt(1 - a))
+R <- 6378.145
+d <- R * c
+return(d)
+}
+
+test <- test %>% mutate(loc_dist = earth.dist(test$pickup_longitude,                                             test$pickup_latitude,
+                            test$dropoff_longitude, test$dropoff_latitude))
+
+train <- train %>% mutate(loc_dist = earth.dist(train$pickup_longitude,                                             train$pickup_latitude,
+                            train$dropoff_longitude, train$dropoff_latitude))
+```
+
+
+
+
+
+### build model
+using h2o automl
+
+first remove unncessary column from train and test data
+```{r}
+train <- train %>% select(-c(pickup_datetime, pickup_longitude, pickup_latitude,
+                             dropoff_datetime, dropoff_latitude, dropoff_longitude, ))
+
+test <- test %>% select(-c(pickup_datetime, pickup_longitude, pickup_latitude,
+                             dropoff_latitude, dropoff_longitude))
+```
+
+
+we are going to make model so convert your all character column into factor
+and any colum which you think it should be as factor for ex:- vendor_id
+
+```{r}
+# for train data
+train$vendor_id <- as.factor(train$vendor_id)
+train$passenger_count <- as.factor(train$passenger_count)
+train$store_and_fwd_flag <- as.factor(train$store_and_fwd_flag)
+train$weekend <- as.factor(train$weekend)
+train$p_week <- as.factor(train$p_week)
+train$p_month <- as.factor(train$p_month)
+train$car <- as.factor(train$car)
+train$rush <- as.factor(train$rush)
+
+# for test data
+test$vendor_id <- as.factor(test$vendor_id)
+test$passenger_count <- as.factor(test$passenger_count)
+test$store_and_fwd_flag <- as.factor(test$store_and_fwd_flag)
+test$weekend <- as.factor(test$weekend)
+test$p_week <- as.factor(test$p_week)
+test$p_month <- as.factor(test$p_month)
+test$car <- as.factor(test$car)
+test$rush <- as.factor(test$rush)
+```
+
+define independent variable and dependent variable list
+```{r}
+y <- "trip_duration"
+x <- setdiff(names(train), y)
+```
+
+
+
+```{r}
+library(h2o)
+h2o.init(max_mem_size = "2G")
+```
+
+
+
+
+
+```{r}
+# convert into h2o frame
+train <- as.h2o(train)
+test <- as.h2o(test)
+```
+
+
+
+automl
+```{r}
+#automl
+aml <- h2o.automl(x=x, y = y,
+           training_frame = train,
+           max_runtime_secs = 240)
+
+lb <- aml@leaderboard
+lb
+```
+
+
+predict
+```{r}
+#predict
+y_pred <- h2o.predict(aml, test[,-1])
+y_pred
+```
+
+### submit in kaggle
+```{r}
+submission <- data.frame(id = as.data.frame(test$id),
+                         trip_duration = as.data.frame(y_pred))
+
+#write csvas
+write.csv(submission, "kaggle.csv", row.names = F)
+```
